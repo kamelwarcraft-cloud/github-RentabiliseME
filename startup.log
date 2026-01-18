@@ -1,0 +1,24 @@
+
+> app@0.1.0 start
+> next start
+
+▲ Next.js 16.1.1
+- Local:         http://localhost:3000
+- Network:       http://87.106.7.92:3000
+
+✓ Starting...
+✓ Ready in 540ms
+⨯ Error: Event handlers cannot be passed to Client Component props.
+  {onClick: function onClick, children: ...}
+            ^^^^^^^^^^^^^^^^
+If you need interactivity, consider converting part of this to a Client Component.
+    at stringify (<anonymous>) {
+  digest: '835744915'
+}
+⨯ Error: Event handlers cannot be passed to Client Component props.
+  {onClick: function onClick, children: ...}
+            ^^^^^^^^^^^^^^^^
+If you need interactivity, consider converting part of this to a Client Component.
+    at stringify (<anonymous>) {
+  digest: '835744915'
+}

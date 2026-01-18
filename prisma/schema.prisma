@@ -1,0 +1,377 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  WORKER
+}
+
+
+enum TaxRegime {
+  MICRO
+  REAL
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum NotificationType {
+  ASSIGNED_TO_PROJECT
+  TIME_ENTRY_ADDED
+  EXPENSE_ADDED
+  QUOTE_SENT
+  INVOICE_SENT
+  INVOICE_PAID
+  PROJECT_AT_RISK
+  TAX_PROVISION
+}
+
+enum WaitlistStatus {
+  PENDING
+  INVITED
+  APPROVED
+}
+
+enum ProjectStatus {
+  PLANNED
+  ACTIVE
+  DONE
+  ARCHIVED
+}
+
+// Cycle de vie (pour afficher / filtrer “En cours” vs “Terminé”)
+// IMPORTANT: doit matcher l'enum PostgreSQL créé dans la migration baseline.
+enum ProjectLifecycle {
+  ACTIVE
+  DONE
+}
+
+
+enum ExpenseCategory {
+  MATERIAL
+  RENTAL
+  TRAVEL
+  SUBCONTRACT
+  OTHER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships  CompanyMember[]
+  // Permet de regrouper les WORKERS rattachés à ce MANAGER (via invitation)
+  managedMembers CompanyMember[] @relation("CompanyMemberManager")
+  timeEntries  TimeEntry[]
+  expenses     Expense[]
+  managedProjects Project[]       // ⭐ NOUVEAU : Projets dont il est le manager
+  projectMembers   ProjectMember[]
+  notifications    Notification[]
+}
+
+model WaitlistEntry {
+  id        String         @id @default(cuid())
+  email     String         @unique
+  source    String?
+  status    WaitlistStatus @default(PENDING)
+  note      String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model Company {
+  id                 String   @id @default(cuid())
+  name               String
+  hourlyCostCents    Int      @default(0)
+  overheadRateBps    Int      @default(0)
+  defaultVatRateBps  Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  members            CompanyMember[]
+  projects           Project[]
+  settings         CompanySettings?
+  clients          Client[]
+  quotes           Quote[]
+  invoices         Invoice[]
+  notifications    Notification[]
+}
+
+model CompanyMember {
+  id        String   @id @default(cuid())
+  role      Role     @default(WORKER)
+  createdAt DateTime @default(now())
+
+  // Pour les WORKERS: quel MANAGER les a invités / à qui ils sont rattachés
+  managerUser   User?   @relation("CompanyMemberManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  managerUserId String?
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+
+  @@unique([companyId, userId])
+  @@index([companyId])
+  @@index([userId])
+  @@index([managerUserId])
+}
+
+model Project {
+  id           String        @id @default(cuid())
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId    String
+  
+  // ⭐ NOUVEAU : Référence au MANAGER/ADMIN qui a créé le projet
+  manager      User?         @relation(fields: [managerId], references: [id], onDelete: SetNull)
+  managerId    String?
+
+
+  name         String
+  clientName   String?
+  address      String?
+  status       ProjectStatus @default(ACTIVE)
+  lifecycle    ProjectLifecycle @default(ACTIVE)
+
+  revenueCents Int           @default(0)
+
+  startDate    DateTime?
+  endDate      DateTime?
+
+  budget       ProjectBudget?
+  timeEntries  TimeEntry[]
+  expenses     Expense[]
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([companyId])
+  @@index([managerId])  // ⭐ NOUVEAU INDEX
+  
+  members          ProjectMember[]
+  quotes           Quote[]
+  invoices         Invoice[]
+}
+
+model ProjectBudget {
+  id                     String   @id @default(cuid())
+  project                Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId              String   @unique
+
+  plannedLaborMinutes    Int      @default(0)
+  plannedMaterialsCents  Int      @default(0)
+  plannedSubcontractCents Int     @default(0)
+  plannedOtherCents      Int      @default(0)
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+model TimeEntry {
+  id        String   @id @default(cuid())
+  companyId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId    String
+
+  date      DateTime
+  minutes   Int
+  task      String?
+  note      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([projectId, date])
+  @@index([userId, date])
+}
+
+model Expense {
+  id         String          @id @default(cuid())
+  companyId  String
+  project    Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId  String
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId     String
+
+  date       DateTime
+  category   ExpenseCategory
+  amountCents Int
+  vendor     String?
+  note       String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([projectId, date])
+  @@index([category, date])
+}
+
+// Landing / bêta: modèle défini plus haut
+
+
+model CompanySettings {
+  id             String   @id @default(cuid())
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId      String   @unique
+
+  taxRegime      TaxRegime @default(MICRO)
+  vatEnabled     Boolean   @default(false)
+  vatRateBps     Int       @default(0)  // ex: 2000 = 20.00%
+  urssafRateBps  Int       @default(0)  // ex: 2200 = 22.00%
+
+  defaultHourlyRateCents Int @default(0)
+  targetMarginBps        Int @default(2000) // 20%
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quotes    Quote[]
+  invoices  Invoice[]
+
+  @@index([companyId])
+}
+
+model ProjectMember {
+  id        String   @id @default(cuid())
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@index([projectId])
+}
+
+model Quote {
+  id        String      @id @default(cuid())
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  project   Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId String?
+
+  client    Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientId  String?
+
+  number    String
+  status    QuoteStatus @default(DRAFT)
+
+  currency  String      @default("EUR")
+  lines     Json        // [{label, qty, unitPriceCents}]
+  subtotalCents Int     @default(0)
+  vatCents      Int     @default(0)
+  totalCents    Int     @default(0)
+
+  sentAt    DateTime?
+  acceptedAt DateTime?
+  rejectedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([projectId])
+  @@index([clientId])
+  @@unique([companyId, number])
+}
+
+model Invoice {
+  id        String       @id @default(cuid())
+  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  project   Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId String?
+
+  client    Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientId  String?
+
+  number    String
+  status    InvoiceStatus @default(DRAFT)
+
+  currency  String       @default("EUR")
+  lines     Json
+  subtotalCents Int      @default(0)
+  vatCents      Int      @default(0)
+  totalCents    Int      @default(0)
+
+  dueDate   DateTime?
+  sentAt    DateTime?
+  paidAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([projectId])
+  @@index([clientId])
+  @@unique([companyId, number])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+
+  type      NotificationType
+  title     String
+  body      String?
+  metadata  Json?
+  readAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([readAt])
+}
